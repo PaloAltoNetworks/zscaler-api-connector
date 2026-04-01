@@ -1,8 +1,9 @@
 import argparse, urllib3, requests, json, sys
-import time, hashlib, os, traceback
+import time, hashlib, os, traceback, pwinput
 import zipfile, io, shutil
 from datetime import datetime, timedelta
 from typing import List, Tuple, Optional
+import logging
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -33,14 +34,35 @@ ZPA_USERNAME    = None
 ZPA_PASSWORD    = None
 ZPA_CUSTOMER_ID = None
 ZPA_CLOUD_URL   = None
+logger          = None
 
 INDIVIDUAL_JSONS = True
 JSONS_ZIP        = True
 ZIA_API          = True
 ZPA_API          = True
 
+logger = logging.getLogger("mylogger")
+
 def print_output(jsondata):
     print(json.dumps(jsondata,indent=4))
+
+def setup_logger(log_file):
+    logger.setLevel(logging.DEBUG)
+    
+    console_output=0
+    
+    formatter = logging.Formatter(f"%(asctime)s - %(levelname)s - message: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    
+    file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    
+    if console_output==1:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+    
+    return logger
 
 def export_policies(session: requests.Session,
                     base_url: str,
@@ -133,6 +155,7 @@ def validate_credentials(platform):
     
     if missing_fields:
         print(f"ERROR_MISSING_CREDENTIALS: {', '.join(missing_fields)}")
+        logger.error(f"ERROR_MISSING_CREDENTIALS: {', '.join(missing_fields)}")
         sys.exit(1)
 
 # --- Obfuscate API key ---
@@ -141,6 +164,7 @@ def obfuscateApiKey():
         # Validate ZIA_API_KEY is not empty (can be 1 character to any length)
         if not ZIA_API_KEY or len(ZIA_API_KEY.strip()) == 0:
             print("ERROR_INVALID_API_KEY")
+            logger.error("Invalid API")
             return None, None
             
         seed = ZIA_API_KEY
@@ -200,7 +224,8 @@ def zpa_authenticate():
         resp = requests.post(url, headers=headers, data=payload, verify=False)
     except requests.RequestException as e:
         print("FAILED_TO_ESTABLISH_ZPA_CONNECTION")
-        sys.exit(1)
+        logger.error(f"Failed to establish ZPA connection")
+        return None
     
     # Check HTTP status
     if resp.status_code != 200:
@@ -209,35 +234,34 @@ def zpa_authenticate():
         try:
             err_body = resp.json()
         except ValueError:
-            # Not JSON
-            #print(f"Authentication Failed: HTTP {resp.status_code} — {resp.text}")
+            logger.error(f"ZPA Login Failed: HTTP {resp.status_code} — {resp.text}")
             print("ZPA_LOGIN_FAILED")
-            sys.exit(1)
+            return None
 
         # err_body is JSON
         err_id = err_body.get("id") or err_body.get("error")
         err_reason = err_body.get("reason") or err_body.get("error_description")
-        #if err_reason:
-            #print(err_reason)
         
         if err_id == "invalid_client":
+            logger.error(f"ZPA Login Failed: {err_reason}")
             print("ZPA_LOGIN_FAILED")
         
-        sys.exit(1)
+        return None
 
     # On success
     try:
         data = resp.json()
     except ValueError:
         print("INVALID_AUTH_RESPONSE")
-        sys.exit(1)
+        return None
     
     token = data.get("access_token")
     if not token:
         print("NO_ACCESS_TOKEN_FOUND")
-        sys.exit(1)
+        return None
     
     print("ZPA_AUTHENTICATED_SUCCESSFULLY")
+    logger.info(f"ZPA Authentication successfull")
     
     return token
 
@@ -256,10 +280,13 @@ def zpa_logout(token):
         #print("response : ",response)
         if response.status_code == 200:
             print("ZPA_LOGGED_OUT_SUCCESSFULLY")
+            logger.info("ZPA logged out successfully")
         else:
-            print("ZPA_LOGGED_OUT_FAILED")
+            print("ZPA_LOGGING_OUT_FAILED")
+            logger.error("ZPA logging out failed")
     except:
-        print("ZPA_LOGGED_OUT_FAILED")
+        print("ZPA_LOGGING_OUT_FAILED")
+        logger.error("ZPA logging out failed")
 
 # -----------------------------
 # GET ALL DATA USING API CALLS
@@ -332,6 +359,7 @@ def save_scim_groups(token, idpdata, output_dir):
         except Exception as e:
             tb = traceback.format_exc()
             print(f"FAILED: {tb}")
+            logger.error(f"FAILED: {tb}")
             zpa_logout(token)
             sys.exit(1)
 
@@ -345,6 +373,7 @@ def save_scim_groups(token, idpdata, output_dir):
 
         save_json(combined_data, output_dir, file_name)
         print(f"GENERATED_FILE: {file_name}")
+        logger.info(f"GENERATED_FILE: {file_name}")
 
 def save_pra_consoles(token, portaldata, output_dir):
     file_name = "object-pra-consoles.json"
@@ -374,6 +403,7 @@ def save_pra_consoles(token, portaldata, output_dir):
         except Exception as e:
             tb = traceback.format_exc()
             print(f"FAILED: {tb}")
+            logger.error(f"FAILED: {tb}")
             zpa_logout(token)
             sys.exit(1)
 
@@ -432,11 +462,13 @@ def fetch_all_objects(token, output_dir):
                 objects_data_found = True
                 save_json(data, output_dir, file_name)
                 print(f"GENERATED_FILE: {file_name}")
+                logger.info(f"GENERATED_FILE: {file_name}")
                 if file_name == "object-idp.json":
                     save_scim_groups(token, data, output_dir)
         except:
             tb = traceback.format_exc()
-            print(f"FAILED: {obj}, ERROR: {tb}")
+            print(f"FAILED: {tb}")
+            logger.error(f"FAILED: {tb}")
             continue
     
     return objects_data_found
@@ -477,11 +509,11 @@ def fetch_all_policies(token, output_dir):
                 policies_data_found = True
                 save_json(policies, output_dir, file_name)
                 print(f"GENERATED_FILE: {file_name}")
+                logger.info(f"GENERATED_FILE: {file_name}")
         except:
             tb = traceback.format_exc()
-            print(f"FAILED: {policy_type}, ERROR: {tb}")
-            #zpa_logout(token)
-            #sys.exit(1)
+            print(f"FAILED: {tb}")
+            logger.error(f"FAILED: {tb}")
             continue
     
     return policies_data_found
@@ -513,11 +545,13 @@ def save_sublocations(session, ZIA_CLOUD_URL, locationdata, output_dir):
         except Exception as e:
             tb = traceback.format_exc()
             print(f"FAILED: {tb}")
+            logger.error(f"FAILED: {tb}")
             return
     
     if all_data:
         save_json(all_data, output_dir, file_name)
         print(f"GENERATED_FILE: {file_name}")
+        logger.info(f"GENERATED_FILE: {file_name}")
 
 def fetch_all_zia_objects(session, ZIA_CLOUD_URL, output_dir):
     """
@@ -615,12 +649,14 @@ def fetch_all_zia_objects(session, ZIA_CLOUD_URL, output_dir):
                 objects_data_found = True
                 save_json(data, output_dir, file_name)
                 print(f"GENERATED_FILE: {file_name}")
+                logger.info(f"GENERATED_FILE: {file_name}")
                 if file_name == "locations.json":
                     save_sublocations(session, ZIA_CLOUD_URL, data, output_dir)
 
         except Exception:
             tb = traceback.format_exc()
-            print(f"FAILED: {name}\n{tb}")
+            print(f"FAILED: {tb}")
+            logger.error(f"FAILED: {tb}")
     
     return objects_data_found
 
@@ -651,14 +687,15 @@ def extract_all_zia_configs(file_dir, input_dir_name):
             response = session.post(login_url, json=payload)
             if response.status_code == 200 and 'JSESSIONID' in session.cookies.get_dict():
                 print("ZIA_AUTHENTICATED_SUCCESSFULLY")
-                #print("Session ID:", session.cookies.get_dict()['JSESSIONID'])
+                logger.info(f"ZIA Authentication successfull")
             else:
-                #print("Login failed:", response.status_code, response.text)
                 print("ZIA_LOGIN_FAILED")
+                logger.error(f"ZIA Login Failed: HTTP {response.status_code} — {response.text}")
                 return False, None
 
     except Exception as e:
         print("FAILED_TO_ESTABLISH_ZIA_CONNECTION")
+        logger.error(f"Failed to establish ZIA connection")
         return False, None
         
     # Create 'input' directory
@@ -683,21 +720,20 @@ def extract_all_zia_configs(file_dir, input_dir_name):
         policy_types = ["BA", "FILETYPE_CONTROL", "BANDWIDTH_CONTROL", "MOBILE_APP_RULE", "URL_FILTERING", "CUSTOM_CAPP", "FIREWALL", "DNAT", "DNS", "INTRUSION_PREVENTION", "EMAIL_DLP", "WEB_DLP", "FORWARDING", "SSLPOL"]
         zip_bytes, err = export_policies(session, ZIA_CLOUD_URL, policy_types, zia_output_dir, output_path = output_filename)
         if err:
-            #print("Export failed:", err)
             print("ERROR_FETCHING_INPUT_ZIP_FILE")
+            logger.error("Error fetching ZIA policies input zip file")
         else:
-            # ~ print(f"GENERATED_ZIP_FILE: {os.path.basename(output_filename)}")
             policies_data_found = True
-            
-    # ~ print("\nobjects_data_found : ",objects_data_found)
-    # ~ print("policies_data_found : ",policies_data_found)
     
     if objects_data_found == True or policies_data_found == True:
         return True, input_dir_path
         
 def extract_all_zpa_configs(file_dir, input_dir_name):
+    
     # ZPA Login
     token = zpa_authenticate()
+    if token == None:
+        return False, None
     #print("\ntoken : ",token)
     
     input_dir_path = os.path.join(file_dir, input_dir_name)
@@ -711,11 +747,11 @@ def extract_all_zpa_configs(file_dir, input_dir_name):
     objects_data_found  = False
     policies_data_found = False
     
-    # Extract ZPA objects
-    objects_data_found = fetch_all_objects(token, zpa_output_dir)
+    # ~ # Extract ZPA objects
+    # ~ objects_data_found = fetch_all_objects(token, zpa_output_dir)
     
-    # Extract ZPA policies
-    policies_data_found = fetch_all_policies(token, zpa_output_dir)
+    # ~ # Extract ZPA policies
+    # ~ policies_data_found = fetch_all_policies(token, zpa_output_dir)
     
     # ZPA Logout
     zpa_logout(token)
@@ -725,6 +761,8 @@ def extract_all_zpa_configs(file_dir, input_dir_name):
     
     if objects_data_found == True or policies_data_found == True:
         return True, input_dir_path
+    
+    return False,None
 
 def main():
     global ZIA_CLOUD_URL
@@ -734,12 +772,17 @@ def main():
     global ZPA_USERNAME
     global ZPA_PASSWORD
     global ZPA_CUSTOMER_ID
-    global ZPA_CLOUD_URL 
-
+    global ZPA_CLOUD_URL
+    global logger
+    
     parser = argparse.ArgumentParser(description="Fetch configuration data from Zscaler ZIA (Zscaler Internet Access)")
     
     file_dir = os.path.dirname(os.path.abspath(__file__))
     #print("\n\nfile_dir : ",file_dir)
+    
+    log_filename = f"log_fetch_{datetime.now().strftime('%Y%m%d')}.log"
+    log_filepath = os.path.join(file_dir, log_filename)
+    logger = setup_logger(log_filepath)
     
     zia_config_status = False
     zpa_config_status = False
@@ -749,66 +792,83 @@ def main():
     input_dir_name = f"zs_config_{timestamp}"
     
     zia_answer = input("Fetch ZIA configuration? (y/n) : ")
-    if zia_answer == "y":
-        ZIA_CLOUD_URL = input("Enter ZIA Cloud URL : ")
-        ZIA_USERNAME  = input("Enter ZIA username : ")
-        ZIA_PASSWORD  = input("Enter ZIA password : ")
-        ZIA_API_KEY   = input("Enter ZIA API key : ")
-        validate_credentials("ZIA")
+    if zia_answer != "y" and zia_answer != "n":
+        print("Wrong choice entered. Selecting 'n' by default")
+        logger.info("Wrong choice entered. Selecting 'n' by default")
     
+    try:
+        if zia_answer == "y":
+            ZIA_CLOUD_URL = input("Enter ZIA Cloud URL : ")
+            ZIA_USERNAME  = pwinput.pwinput("Enter ZIA username : ")
+            ZIA_PASSWORD  = pwinput.pwinput("Enter ZIA password : ")
+            ZIA_API_KEY   = pwinput.pwinput("Enter ZIA API key : ")
+            validate_credentials("ZIA")
+    except KeyboardInterrupt:
+        print("\nCancelled by user. Exiting.")
+        logger.info("Cancelled by user. Exiting.")
+        exit(1)
+        
     zpa_answer = input("\nFetch ZPA configuration? (y/n) : ")
-    if zpa_answer == "y":
-        ZPA_CLOUD_URL   = input("Enter ZPA Cloud URL : ")
-        ZPA_CUSTOMER_ID = input("Enter ZPA customer ID : ")
-        ZPA_USERNAME    = input("Enter ZPA client ID : ")
-        ZPA_PASSWORD    = input("Enter ZPA client secret : ")
-        validate_credentials("ZPA")
+    if zpa_answer != "y" and zpa_answer != "n":
+        print("Wrong choice entered. Selecting 'n' by default")
+        logger.info("Wrong choice entered. Selecting 'n' by default")
+        
+    try:
+        if zpa_answer == "y":
+            ZPA_CLOUD_URL   = input("Enter ZPA Cloud URL : ")
+            ZPA_CUSTOMER_ID = pwinput.pwinput("Enter ZPA customer ID : ")
+            ZPA_USERNAME    = pwinput.pwinput("Enter ZPA client ID : ")
+            ZPA_PASSWORD    = pwinput.pwinput("Enter ZPA client secret : ")
+            validate_credentials("ZPA")
+    except KeyboardInterrupt:
+        print("\nCancelled by user. Exiting.")
+        logger.info("Cancelled by user. Exiting.")
+        exit(1)
     
     if zia_answer == "y":
         start_time = datetime.now()
         print(f"{'-'*100}")
         print(f"ZIA configuration extraction process started at: {start_time}")
+        logger.info(f"ZIA configuration extraction process started at: {start_time}")
         
         zia_config_status, input_dir_path = extract_all_zia_configs(file_dir, input_dir_name)
         
         end_time = datetime.now()
         print(f"ZIA configuration extraction process ended at: {start_time}")
         print(f"Total execution time: {end_time - start_time}")
+        logger.info(f"ZIA configuration extraction process ended at: {start_time}")
+        logger.info(f"Total execution time: {end_time - start_time}")
         print(f"{'-'*100}")
         
     if zpa_answer == "y":
         start_time = datetime.now()
         print(f"{'-'*100}")
         print(f"ZPA configuration extraction process started at: {start_time}")
+        logger.info(f"ZPA configuration extraction process started at: {start_time}")
         
         zpa_config_status, input_dir_path = extract_all_zpa_configs(file_dir, input_dir_name)
         
         end_time = datetime.now()
         print(f"ZPA configuration extraction process ended at: {start_time}")
         print(f"Total execution time: {end_time - start_time}")
+        logger.info(f"ZPA configuration extraction process ended at: {start_time}")
+        logger.info(f"Total execution time: {end_time - start_time}")
         print(f"{'-'*100}")
     
-    # ~ print("\nzia_config_status : ",zia_config_status)
-    # ~ print("zpa_config_status : ",zpa_config_status)
+    #print("\nzia_config_status : ",zia_config_status)
+    #print("zpa_config_status : ",zpa_config_status)
     
     if zia_config_status == True or zpa_config_status == True:
-        
         input_dir_name = os.path.basename(input_dir_path)
-        #print("\ninput_dir_name : ",input_dir_name)
-    
+        
         shutil.make_archive(
             base_name=input_dir_path,
             format="zip",
             root_dir=file_dir,
             base_dir=input_dir_name
         )
-        
-        # ~ print(f"\n{'-'*100}")
         print(f"Zscaler config zip created: {input_dir_name}.zip")
+        logger.info(f"Zscaler config zip created: {input_dir_name}.zip")
         
-        # ~ shutil.rmtree(input_dir_path)
-        # ~ print("input directory removed after zipping")
-        # ~ print(f"{'-'*100}")
-    
 if __name__ == "__main__":
     main()
