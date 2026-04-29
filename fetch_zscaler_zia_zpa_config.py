@@ -621,10 +621,6 @@ def fetch_all_zia_objects(session, ZIA_CLOUD_URL, output_dir):
             "endpoint": "/api/v1/groups",
             "file": "groups.json",
         },
-        "firewall_rules": {
-            "endpoint": "/api/v1/firewallFilteringRules",
-            "file": "firewallFilteringRules.json",
-        },
         "dlp_engines": {
             "endpoint": "/api/v1/dlpEngines",
             "file": "dlpEngines.json",
@@ -636,9 +632,68 @@ def fetch_all_zia_objects(session, ZIA_CLOUD_URL, output_dir):
         "users": {
             "endpoint": "/api/v1/users",
             "file": "users.json",
+        },
+        "emailRecipientProfile": {
+            "endpoint": "/api/v1/emailRecipientProfile",
+            "file": "object_email_recipient_profile.json",
         }
     }
-
+    
+    ZIA_GROUPED_ENDPOINTS = {
+        "malware_policy": {
+            "file": "object_malware_policy.json",
+            "endpoints": {
+                "atpMalwareInspection": "/api/v1/cyberThreatProtection/atpMalwareInspection",
+                "atpMalwareProtocols": "/api/v1/cyberThreatProtection/atpMalwareProtocols",
+                "malwareSettings": "/api/v1/cyberThreatProtection/malwareSettings",
+                "malwarePolicy": "/api/v1/cyberThreatProtection/malwarePolicy",
+                "mobileAdvanceThreatSettings": "/api/v1/mobileAdvanceThreatSettings"
+            }
+        },
+        "browser_control_policy": {
+            "file": "object_browser_control.json",
+            "endpoints": {
+                "browserControlSettings": "/api/v1/browserControlSettings"
+            }
+        },
+        "advanced_threat_policy": {
+            "file": "object_advanced_threat.json",
+            "endpoints": {
+                "advancedThreatSettings": "/api/v1/cyberThreatProtection/advancedThreatSettings",
+                "maliciousUrls": "/api/v1/cyberThreatProtection/maliciousUrls",
+                "securityExceptions": "/api/v1/cyberThreatProtection/securityExceptions"
+            }
+        },
+        "saas_security_policy": {
+            "file": "object_sass_security.json",
+            "endpoints": {
+                "casbDlpRules": "/api/v1/casbDlpRules/all",
+                "casbMalwareRules": "/api/v1/casbMalwareRules/all"
+            }
+        },
+        "advanced_settings_policy": {
+            "file": "object_advanced_settings.json",
+            "endpoints": {
+                "advancedSettings": "/api/v1/advancedSettings",
+                "sandboxRules": "/api/v1/sandboxRules"
+            }
+        },
+        "security_settings":{
+            "file": "object_security_settings.json",
+            "endpoints": {
+                "allowlist": "/api/v1/security",
+                "blacklist": "/api/v1/security/advanced"
+            }
+        },
+        "other_settings":{
+            "file": "object_other_settings.json",
+            "endpoints": {
+                "sslInspectionRules": "/api/v1/sslInspectionRules",
+                "advancedUrlFilterAndCloudAppSettings": "/api/v1/advancedUrlFilterAndCloudAppSettings"
+            }
+        }
+    }
+    
     for name, cfg in ZIA_OBJECT_ENDPOINTS.items():
         try:
             file_name = cfg["file"]
@@ -657,6 +712,25 @@ def fetch_all_zia_objects(session, ZIA_CLOUD_URL, output_dir):
             tb = traceback.format_exc()
             print(f"FAILED: {tb}")
             logger.error(f"FAILED: {tb}")
+    
+    for group_name, cfg in ZIA_GROUPED_ENDPOINTS.items():
+        try:
+            grouped_data = {}
+            for key, endpoint in cfg["endpoints"].items():
+                data = fetch_and_save_zia_data(session, ZIA_CLOUD_URL, endpoint)
+                if data is not None:
+                    grouped_data[key] = data
+            
+            if grouped_data:
+                objects_data_found = True
+                save_json(grouped_data, output_dir, cfg["file"])
+                print(f"GENERATED_FILE: {cfg['file']}")
+                logger.info(f"GENERATED_FILE: {cfg['file']}")
+        
+        except Exception:
+            tb = traceback.format_exc()
+            print(f"FAILED GROUP: {tb}")
+            logger.error(f"FAILED GROUP: {tb}")
     
     return objects_data_found
 
@@ -799,7 +873,7 @@ def main():
     try:
         if zia_answer == "y":
             ZIA_CLOUD_URL = input("Enter ZIA Cloud URL : ")
-            ZIA_USERNAME  = pwinput.pwinput("Enter ZIA username : ")
+            ZIA_USERNAME  = input("Enter ZIA username : ")
             ZIA_PASSWORD  = pwinput.pwinput("Enter ZIA password : ")
             ZIA_API_KEY   = pwinput.pwinput("Enter ZIA API key : ")
             validate_credentials("ZIA")
@@ -816,8 +890,8 @@ def main():
     try:
         if zpa_answer == "y":
             ZPA_CLOUD_URL   = input("Enter ZPA Cloud URL : ")
-            ZPA_CUSTOMER_ID = pwinput.pwinput("Enter ZPA customer ID : ")
-            ZPA_USERNAME    = pwinput.pwinput("Enter ZPA client ID : ")
+            ZPA_CUSTOMER_ID = input("Enter ZPA customer ID : ")
+            ZPA_USERNAME    = input("Enter ZPA client ID : ")
             ZPA_PASSWORD    = pwinput.pwinput("Enter ZPA client secret : ")
             validate_credentials("ZPA")
     except KeyboardInterrupt:
