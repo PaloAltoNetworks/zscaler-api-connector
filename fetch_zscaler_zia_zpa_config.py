@@ -5,8 +5,6 @@ from datetime import datetime, timedelta
 from typing import List, Tuple, Optional
 import logging
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 '''
 IP Source Groups            https://help.zscaler.com/zia/firewall-policies#/ipSourceGroups-get
 IPv6 Source Groups          https://help.zscaler.com/zia/firewall-policies#/ipSourceGroups/ipv6SourceGroups-get 
@@ -35,6 +33,7 @@ ZPA_PASSWORD    = None
 ZPA_CUSTOMER_ID = None
 ZPA_CLOUD_URL   = None
 logger          = None
+VERIFY_SSL      = True
 
 INDIVIDUAL_JSONS = True
 JSONS_ZIP        = True
@@ -221,7 +220,7 @@ def zpa_authenticate():
     }
     
     try:
-        resp = requests.post(url, headers=headers, data=payload, verify=False)
+        resp = requests.post(url, headers=headers, data=payload, verify=VERIFY_SSL)
     except requests.RequestException as e:
         print("FAILED_TO_ESTABLISH_ZPA_CONNECTION")
         logger.error(f"Failed to establish ZPA connection")
@@ -276,7 +275,7 @@ def zpa_logout(token):
         'Authorization': f'Bearer {token}'
               }
     try:
-        response = requests.request("POST", url, headers=headers, data=payload, verify=False)
+        response = requests.request("POST", url, headers=headers, data=payload, verify=VERIFY_SSL)
         #print("response : ",response)
         if response.status_code == 200:
             print("ZPA_LOGGED_OUT_SUCCESSFULLY")
@@ -303,7 +302,7 @@ def zpa_get_all(endpoint, token, page_size=500):
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
-        resp = requests.get(url, headers=headers, verify=False)
+        resp = requests.get(url, headers=headers, verify=VERIFY_SSL)
         resp.raise_for_status()
         data = resp.json()
 
@@ -757,6 +756,7 @@ def extract_all_zia_configs(file_dir, input_dir_name):
             }
             
             session = requests.Session()
+            session.verify = VERIFY_SSL
             #print("Payload being sent:", payload)
             response = session.post(login_url, json=payload)
             if response.status_code == 200 and 'JSESSIONID' in session.cookies.get_dict():
@@ -847,24 +847,48 @@ def main():
     global ZPA_PASSWORD
     global ZPA_CUSTOMER_ID
     global ZPA_CLOUD_URL
+    global VERIFY_SSL
     global logger
     
     parser = argparse.ArgumentParser(description="Fetch configuration data from Zscaler ZIA (Zscaler Internet Access)")
-    
+    parser.add_argument(
+        "--no-verify-ssl",
+        action="store_true",
+        help="INSECURE: disable TLS certificate validation. Only use for debugging "
+             "behind a TLS-inspecting proxy when --ca-bundle is not possible."
+    )
+    parser.add_argument(
+        "--ca-bundle",
+        default=os.environ.get("REQUESTS_CA_BUNDLE"),
+        help="Path to a custom CA bundle (PEM). Use this if your network proxy "
+             "re-signs TLS traffic. Preferred over --no-verify-ssl."
+    )
+    args = parser.parse_args()
+
     file_dir = os.path.dirname(os.path.abspath(__file__))
     #print("\n\nfile_dir : ",file_dir)
-    
+
     log_filename = f"log_fetch_{datetime.now().strftime('%Y%m%d')}.log"
     log_filepath = os.path.join(file_dir, log_filename)
     logger = setup_logger(log_filepath)
-    
+
     zia_config_status = False
     zpa_config_status = False
-    
+
     # Create 'input' directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     input_dir_name = f"zs_config_{timestamp}"
-    
+
+    if args.ca_bundle:
+        VERIFY_SSL = args.ca_bundle
+        logger.info(f"Using custom CA bundle for TLS verification: {args.ca_bundle}")
+    elif args.no_verify_ssl:
+        VERIFY_SSL = False
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        print("WARNING: TLS certificate validation is DISABLED (--no-verify-ssl). "
+              "Credentials may be exposed to man-in-the-middle attackers.\n")
+        logger.warning("TLS certificate validation disabled via --no-verify-ssl")
+
     zia_answer = input("Fetch ZIA configuration? (y/n) : ")
     if zia_answer != "y" and zia_answer != "n":
         print("Wrong choice entered. Selecting 'n' by default")
