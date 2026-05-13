@@ -851,30 +851,45 @@ def main():
     global logger
     
     parser = argparse.ArgumentParser(description="Fetch configuration data from Zscaler ZIA (Zscaler Internet Access)")
-    
+    parser.add_argument(
+        "--no-verify-ssl",
+        action="store_true",
+        help="INSECURE: disable TLS certificate validation. Only use for debugging "
+             "behind a TLS-inspecting proxy when --ca-bundle is not possible."
+    )
+    parser.add_argument(
+        "--ca-bundle",
+        default=os.environ.get("REQUESTS_CA_BUNDLE"),
+        help="Path to a custom CA bundle (PEM). Use this if your network proxy "
+             "re-signs TLS traffic. Preferred over --no-verify-ssl."
+    )
+    args = parser.parse_args()
+
     file_dir = os.path.dirname(os.path.abspath(__file__))
     #print("\n\nfile_dir : ",file_dir)
-    
+
     log_filename = f"log_fetch_{datetime.now().strftime('%Y%m%d')}.log"
     log_filepath = os.path.join(file_dir, log_filename)
     logger = setup_logger(log_filepath)
-    
+
     zia_config_status = False
     zpa_config_status = False
-    
+
     # Create 'input' directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     input_dir_name = f"zs_config_{timestamp}"
 
-    bypass_answer = input("Insecurely bypass TLS certificate validation? (y/n) : ")
-    if bypass_answer != "y" and bypass_answer != "n":
-        print("Wrong choice entered. Selecting 'n' by default")
-        logger.info("Wrong choice entered. Selecting 'n' by default")
-    if bypass_answer == "y":
+    if args.ca_bundle:
+        VERIFY_SSL = args.ca_bundle
+        logger.info(f"Using custom CA bundle for TLS verification: {args.ca_bundle}")
+    elif args.no_verify_ssl:
         VERIFY_SSL = False
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        print("WARNING: TLS certificate validation is DISABLED (--no-verify-ssl). "
+              "Credentials may be exposed to man-in-the-middle attackers.\n")
+        logger.warning("TLS certificate validation disabled via --no-verify-ssl")
 
-    zia_answer = input("\nFetch ZIA configuration? (y/n) : ")
+    zia_answer = input("Fetch ZIA configuration? (y/n) : ")
     if zia_answer != "y" and zia_answer != "n":
         print("Wrong choice entered. Selecting 'n' by default")
         logger.info("Wrong choice entered. Selecting 'n' by default")
