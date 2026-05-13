@@ -69,8 +69,17 @@ pip list | grep requests
 **Command Syntax:**
 
 ```bash
-python3 fetch_zscaler_zia_zpa_config.py
+python3 fetch_zscaler_zia_zpa_config.py [--ca-bundle <path>] [--no-verify-ssl]
 ```
+
+**Optional flags:**
+
+| Flag | Purpose |
+|---|---|
+| `--ca-bundle <path>` | Path to a PEM CA bundle. Use this if your corporate proxy performs TLS inspection and re-signs traffic to Zscaler. May also be set via the `REQUESTS_CA_BUNDLE` environment variable. |
+| `--no-verify-ssl` | **Insecure.** Disables TLS certificate validation entirely. Use only as a last resort for debugging when `--ca-bundle` is not possible. |
+
+By default, the script validates TLS certificates when connecting to Zscaler APIs. If you see `SSLCertVerificationError`, you are most likely behind a TLS-inspecting proxy — export your proxy's root CA to a PEM file and pass it with `--ca-bundle`.
 
 > **Note:**
 > - ZIA API to export the policy config has a rate limit of 1 API call per hour. So, if the script execution is successful and you try to execute it again within an hour then in the next iteration, the API will not return the ZIA policy configs and hence the new zip will not include the ZIA policy config files.
