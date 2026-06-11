@@ -821,17 +821,17 @@ def extract_all_zpa_configs(file_dir, input_dir_name):
     objects_data_found  = False
     policies_data_found = False
     
-    # ~ # Extract ZPA objects
-    # ~ objects_data_found = fetch_all_objects(token, zpa_output_dir)
+    # Extract ZPA objects
+    objects_data_found = fetch_all_objects(token, zpa_output_dir)
     
-    # ~ # Extract ZPA policies
-    # ~ policies_data_found = fetch_all_policies(token, zpa_output_dir)
+    # Extract ZPA policies
+    policies_data_found = fetch_all_policies(token, zpa_output_dir)
     
     # ZPA Logout
     zpa_logout(token)
     
-    # ~ print("\nobjects_data_found : ",objects_data_found)
-    # ~ print("policies_data_found : ",policies_data_found)
+    print("\nobjects_data_found : ",objects_data_found)
+    print("policies_data_found : ",policies_data_found)
     
     if objects_data_found == True or policies_data_found == True:
         return True, input_dir_path
