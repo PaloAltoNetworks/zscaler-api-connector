@@ -283,9 +283,9 @@ def zpa_logout(token):
         else:
             print("ZPA_LOGGING_OUT_FAILED")
             logger.error("ZPA logging out failed")
-    except:
+    except Exception as e:
         print("ZPA_LOGGING_OUT_FAILED")
-        logger.error("ZPA logging out failed")
+        logger.error(f"ZPA logging out failed: {e}")
 
 # -----------------------------
 # GET ALL DATA USING API CALLS
@@ -303,6 +303,10 @@ def zpa_get_all(endpoint, token, page_size=500):
             "Content-Type": "application/json",
         }
         resp = requests.get(url, headers=headers, verify=VERIFY_SSL)
+        if resp.status_code in (401, 403):
+            logger.warning(f"SKIPPED: {endpoint} - HTTP {resp.status_code} (insufficient permissions)")
+            print(f"SKIPPED: {endpoint} ({resp.status_code} - insufficient permissions)")
+            return None
         resp.raise_for_status()
         data = resp.json()
 
@@ -343,24 +347,27 @@ def save_scim_groups(token, idpdata, output_dir):
     for data in datalist:
         idpid = data["id"]
         endpoint = f"{v1_base_path}/scimgroup/idpId/{idpid}"
-        #print("\nendpoint : ", endpoint)
-        
+
         try:
-            # Fetch data from the endpoint
             response_data = zpa_get_all(endpoint, token)
-            
+            if response_data is None:
+                logger.warning(f"SKIPPED: SCIM group for IDP {idpid} (insufficient permissions)")
+                print(f"SKIPPED: SCIM group for IDP {idpid} (insufficient permissions)")
+                continue
+
             total_count += response_data.get("totalCount", 0)
             total_pages += response_data.get("totalPages", 0)
-            #print("\ntotal_count : ",total_count)
-            #print("total_pages : ",total_pages)
             all_data.extend(response_data.get("list", []))
-        
+
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response is not None else "unknown"
+            logger.warning(f"SKIPPED: SCIM group for IDP {idpid} - HTTP {status}")
+            print(f"SKIPPED: SCIM group for IDP {idpid} (HTTP {status})")
+            continue
         except Exception as e:
-            tb = traceback.format_exc()
-            print(f"FAILED: {tb}")
-            logger.error(f"FAILED: {tb}")
-            zpa_logout(token)
-            sys.exit(1)
+            logger.error(f"FAILED fetching SCIM group for IDP {idpid}: {e}")
+            print(f"FAILED: SCIM group for IDP {idpid} - {e}")
+            continue
 
     if all_data:
         # Once all data is collected, save it to the file
@@ -387,24 +394,27 @@ def save_pra_consoles(token, portaldata, output_dir):
     for data in datalist:
         portalid = data["id"]
         endpoint = f"{v1_base_path}/{portalid}"
-        #print("\nendpoint : ", endpoint)
-        
+
         try:
-            # Fetch data from the endpoint
             response_data = zpa_get_all(endpoint, token)
-            
+            if response_data is None:
+                logger.warning(f"SKIPPED: PRA console for portal {portalid} (insufficient permissions)")
+                print(f"SKIPPED: PRA console for portal {portalid} (insufficient permissions)")
+                continue
+
             total_count += response_data.get("totalCount", 0)
             total_pages += response_data.get("totalPages", 0)
-            #print("\ntotal_count : ",total_count)
-            #print("total_pages : ",total_pages)
             all_data.extend(response_data.get("list", []))
-        
+
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response is not None else "unknown"
+            logger.warning(f"SKIPPED: PRA console for portal {portalid} - HTTP {status}")
+            print(f"SKIPPED: PRA console for portal {portalid} (HTTP {status})")
+            continue
         except Exception as e:
-            tb = traceback.format_exc()
-            print(f"FAILED: {tb}")
-            logger.error(f"FAILED: {tb}")
-            zpa_logout(token)
-            sys.exit(1)
+            logger.error(f"FAILED fetching PRA console for portal {portalid}: {e}")
+            print(f"FAILED: PRA console for portal {portalid} - {e}")
+            continue
 
     if all_data:
         # Once all data is collected, save it to the file
@@ -464,10 +474,17 @@ def fetch_all_objects(token, output_dir):
                 logger.info(f"GENERATED_FILE: {file_name}")
                 if file_name == "object-idp.json":
                     save_scim_groups(token, data, output_dir)
-        except:
-            tb = traceback.format_exc()
-            print(f"FAILED: {tb}")
-            logger.error(f"FAILED: {tb}")
+            else:
+                print(f"SKIPPED: {file_name} (no data or insufficient permissions for {obj})")
+                logger.warning(f"SKIPPED: {file_name} (no data or insufficient permissions for {obj})")
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response is not None else "unknown"
+            print(f"SKIPPED: {file_name} (HTTP {status} for {obj})")
+            logger.warning(f"SKIPPED: {file_name} - HTTP {status} for {obj}")
+            continue
+        except Exception as e:
+            logger.error(f"FAILED fetching {obj}: {e}")
+            print(f"FAILED: {obj} - {e}")
             continue
     
     return objects_data_found
@@ -509,10 +526,17 @@ def fetch_all_policies(token, output_dir):
                 save_json(policies, output_dir, file_name)
                 print(f"GENERATED_FILE: {file_name}")
                 logger.info(f"GENERATED_FILE: {file_name}")
-        except:
-            tb = traceback.format_exc()
-            print(f"FAILED: {tb}")
-            logger.error(f"FAILED: {tb}")
+            else:
+                print(f"SKIPPED: {file_name} (no data or insufficient permissions for {policy_type})")
+                logger.warning(f"SKIPPED: {file_name} (no data or insufficient permissions for {policy_type})")
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response is not None else "unknown"
+            print(f"SKIPPED: {file_name} (HTTP {status} for {policy_type})")
+            logger.warning(f"SKIPPED: {file_name} - HTTP {status} for {policy_type}")
+            continue
+        except Exception as e:
+            logger.error(f"FAILED fetching policy {policy_type}: {e}")
+            print(f"FAILED: {policy_type} - {e}")
             continue
     
     return policies_data_found
@@ -520,11 +544,17 @@ def fetch_all_policies(token, output_dir):
 def fetch_and_save_zia_data(session, base_url, endpoint):
     url = f"{base_url}{endpoint}"
     response = session.get(url, timeout=30)
-    
+
     if response.status_code == 200:
         data = response.json()
         return data
+    elif response.status_code in (401, 403):
+        logger.warning(f"SKIPPED: {endpoint} - HTTP {response.status_code} (insufficient permissions)")
+        print(f"SKIPPED: {endpoint} ({response.status_code} - insufficient permissions)")
+        return None
     else:
+        logger.warning(f"SKIPPED: {endpoint} - HTTP {response.status_code}")
+        print(f"SKIPPED: {endpoint} (HTTP {response.status_code})")
         return None
 
 def save_sublocations(session, ZIA_CLOUD_URL, locationdata, output_dir):
@@ -538,14 +568,14 @@ def save_sublocations(session, ZIA_CLOUD_URL, locationdata, output_dir):
         locationid = data["id"]
         endpoint = f"{v1_base_path}/{locationid}/sublocations"
         try:
-            # Fetch data from the endpoint
-            response_data =  fetch_and_save_zia_data(session, ZIA_CLOUD_URL, endpoint)
+            response_data = fetch_and_save_zia_data(session, ZIA_CLOUD_URL, endpoint)
+            if response_data is None:
+                continue
             all_data.extend(response_data)
         except Exception as e:
-            tb = traceback.format_exc()
-            print(f"FAILED: {tb}")
-            logger.error(f"FAILED: {tb}")
-            return
+            logger.error(f"FAILED fetching sublocations for location {locationid}: {e}")
+            print(f"FAILED: sublocations for location {locationid} - {e}")
+            continue
     
     if all_data:
         save_json(all_data, output_dir, file_name)
@@ -697,7 +727,6 @@ def fetch_all_zia_objects(session, ZIA_CLOUD_URL, output_dir):
         try:
             file_name = cfg["file"]
             endpoint  = cfg["endpoint"]
-            data = None
             data = fetch_and_save_zia_data(session, ZIA_CLOUD_URL, endpoint)
             if data is not None:
                 objects_data_found = True
@@ -707,10 +736,9 @@ def fetch_all_zia_objects(session, ZIA_CLOUD_URL, output_dir):
                 if file_name == "locations.json":
                     save_sublocations(session, ZIA_CLOUD_URL, data, output_dir)
 
-        except Exception:
-            tb = traceback.format_exc()
-            print(f"FAILED: {tb}")
-            logger.error(f"FAILED: {tb}")
+        except Exception as e:
+            logger.error(f"FAILED fetching ZIA object {name}: {e}")
+            print(f"FAILED: {name} - {e}")
     
     for group_name, cfg in ZIA_GROUPED_ENDPOINTS.items():
         try:
@@ -726,10 +754,9 @@ def fetch_all_zia_objects(session, ZIA_CLOUD_URL, output_dir):
                 print(f"GENERATED_FILE: {cfg['file']}")
                 logger.info(f"GENERATED_FILE: {cfg['file']}")
         
-        except Exception:
-            tb = traceback.format_exc()
-            print(f"FAILED GROUP: {tb}")
-            logger.error(f"FAILED GROUP: {tb}")
+        except Exception as e:
+            logger.error(f"FAILED fetching ZIA group {group_name}: {e}")
+            print(f"FAILED: {group_name} - {e}")
     
     return objects_data_found
 
